@@ -13,7 +13,7 @@
     "react": "^18",
     "react-dom": "^18",
     "@supabase/supabase-js": "^2.44.4",
-    "date-fns": "^3.6.0",
+    "date-fns": "^3.6.0"
   },
   "devDependencies": {
     "@types/node": "^20",
