@@ -1,14 +1,46 @@
 import { useState, useEffect } from 'react'
 import { format, startOfMonth, endOfMonth, subMonths } from 'date-fns'
-import { supabase, Expense } from '@/lib/supabase'
-import { exportExpensesToCSV } from '@/lib/export'
+import { supabase, Expense, LedgerTransaction } from '@/lib/supabase'
+import { exportToCSV, UnifiedRecord } from '@/lib/export'
 import PageHeader from '@/components/PageHeader'
 import BottomNav from '@/components/BottomNav'
 import EditModal from '@/components/EditModal'
 import Toast from '@/components/Toast'
 
+// Ledger entries are presented as a category named after the person
+function ledgerToUnified(tx: LedgerTransaction): UnifiedRecord {
+  return {
+    id: tx.id,
+    date: tx.date,
+    item: tx.note ? `Cash to ${tx.person} — ${tx.note}` : `Cash to ${tx.person}`,
+    category: tx.person,
+    amount: tx.amount,
+    notes: undefined,
+    source: 'ledger',
+  }
+}
+
+function expenseToUnified(e: Expense): UnifiedRecord {
+  return {
+    id: e.id,
+    date: e.date,
+    item: e.item,
+    category: e.category,
+    amount: e.amount,
+    notes: e.notes,
+    source: 'expense',
+  }
+}
+
+const PERSON_COLORS: Record<string, string> = {
+  H: '#7B9E87',
+  S: '#8B7BA8',
+  L: '#C4923A',
+}
+
 export default function Records() {
   const [expenses, setExpenses] = useState<Expense[]>([])
+  const [ledgerTx, setLedgerTx] = useState<LedgerTransaction[]>([])
   const [categories, setCategories] = useState<string[]>(['fruits', 'vegetables', 'others'])
   const [monthOffset, setMonthOffset] = useState(0)
   const [loading, setLoading] = useState(true)
@@ -23,38 +55,41 @@ export default function Records() {
   const monthEnd = format(endOfMonth(targetDate), 'yyyy-MM-dd')
   const monthKey = format(targetDate, 'yyyy-MM')
 
-  useEffect(() => {
-    loadExpenses()
-  }, [monthOffset]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  useEffect(() => {
-    loadCategories()
-  }, [])
+  useEffect(() => { loadData() }, [monthOffset]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { loadCategories() }, [])
 
   const loadCategories = async () => {
     const { data } = await supabase
-      .from('app_settings')
-      .select('value')
-      .eq('key', 'categories')
-      .single()
+      .from('app_settings').select('value').eq('key', 'categories').single()
     if (data) setCategories(data.value as string[])
   }
 
-  const loadExpenses = async () => {
+  const loadData = async () => {
     setLoading(true)
-    const { data } = await supabase
-      .from('expenses')
-      .select('*')
-      .gte('date', monthStart)
-      .lte('date', monthEnd)
-      .order('date', { ascending: false })
-      .order('created_at', { ascending: false })
-    setExpenses(data || [])
+    const [expRes, ledRes] = await Promise.all([
+      supabase.from('expenses').select('*')
+        .gte('date', monthStart).lte('date', monthEnd)
+        .order('date', { ascending: false })
+        .order('created_at', { ascending: false }),
+      supabase.from('ledger_transactions').select('*')
+        .gte('date', monthStart).lte('date', monthEnd)
+        .order('date', { ascending: false })
+        .order('created_at', { ascending: false }),
+    ])
+    setExpenses(expRes.data || [])
+    setLedgerTx(ledRes.data || [])
     setLoading(false)
   }
 
-  const filtered = filterCat === 'all' ? expenses : expenses.filter((e) => e.category === filterCat)
-  const total = filtered.reduce((s, e) => s + Number(e.amount), 0)
+  // Merge and sort all records by date desc
+  const allUnified: UnifiedRecord[] = [
+    ...expenses.map(expenseToUnified),
+    ...ledgerTx.map(ledgerToUnified),
+  ].sort((a, b) => b.date.localeCompare(a.date) || b.id.localeCompare(a.id))
+
+  const filterOptions = ['all', ...categories, 'H', 'S', 'L']
+  const filtered = filterCat === 'all' ? allUnified : allUnified.filter((r) => r.category === filterCat)
+  const total = filtered.reduce((s, r) => s + Number(r.amount), 0)
 
   const handleSave = async (id: string, data: Partial<Expense>) => {
     const { error } = await supabase.from('expenses').update(data).eq('id', id)
@@ -62,7 +97,7 @@ export default function Records() {
       setToast({ message: 'Could not save changes', type: 'error' })
     } else {
       setToast({ message: 'Record updated', type: 'success' })
-      loadExpenses()
+      loadData()
     }
   }
 
@@ -72,27 +107,32 @@ export default function Records() {
       setToast({ message: 'Could not delete', type: 'error' })
     } else {
       setToast({ message: 'Record deleted', type: 'success' })
-      loadExpenses()
+      loadData()
     }
   }
 
-  // Group expenses by date
-  const grouped: Record<string, Expense[]> = {}
-  filtered.forEach((e) => {
-    if (!grouped[e.date]) grouped[e.date] = []
-    grouped[e.date].push(e)
+  // Group by date
+  const grouped: Record<string, UnifiedRecord[]> = {}
+  filtered.forEach((r) => {
+    if (!grouped[r.date]) grouped[r.date] = []
+    grouped[r.date].push(r)
   })
   const groupedDates = Object.keys(grouped).sort((a, b) => b.localeCompare(a))
 
-  // Long-press to reveal edit
   let pressTimer: NodeJS.Timeout
-  const handlePressStart = (id: string) => {
-    pressTimer = setTimeout(() => {
-      setLongPressId(id)
-    }, 600)
+  const handlePressStart = (id: string, isLedger: boolean) => {
+    if (isLedger) return // ledger entries are not editable here
+    pressTimer = setTimeout(() => setLongPressId(id), 600)
   }
-  const handlePressEnd = () => {
-    clearTimeout(pressTimer)
+  const handlePressEnd = () => clearTimeout(pressTimer)
+
+  const getCategoryLabel = (cat: string) => {
+    if (['H', 'S', 'L'].includes(cat)) return `Cash — ${cat}`
+    return cat.charAt(0).toUpperCase() + cat.slice(1)
+  }
+
+  const getCategoryColor = (cat: string) => {
+    return PERSON_COLORS[cat] || undefined
   }
 
   return (
@@ -114,7 +154,7 @@ export default function Records() {
         action={
           <div style={{ display: 'flex', gap: 4 }}>
             <button
-              onClick={() => exportExpensesToCSV(filtered, monthKey)}
+              onClick={() => exportToCSV(filtered, monthKey)}
               style={{
                 height: 32,
                 padding: '0 10px',
@@ -133,16 +173,10 @@ export default function Records() {
             <button
               onClick={() => setMonthOffset((o) => o + 1)}
               style={{
-                width: 32,
-                height: 32,
-                borderRadius: 8,
-                border: '1px solid var(--border)',
-                background: 'var(--bg-3)',
-                color: 'var(--text-2)',
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
+                width: 32, height: 32, borderRadius: 8,
+                border: '1px solid var(--border)', background: 'var(--bg-3)',
+                color: 'var(--text-2)', cursor: 'pointer',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
               }}
             >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -153,16 +187,11 @@ export default function Records() {
               onClick={() => setMonthOffset((o) => Math.max(0, o - 1))}
               disabled={monthOffset === 0}
               style={{
-                width: 32,
-                height: 32,
-                borderRadius: 8,
-                border: '1px solid var(--border)',
-                background: 'var(--bg-3)',
+                width: 32, height: 32, borderRadius: 8,
+                border: '1px solid var(--border)', background: 'var(--bg-3)',
                 color: monthOffset === 0 ? 'var(--text-3)' : 'var(--text-2)',
                 cursor: monthOffset === 0 ? 'default' : 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
               }}
             >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -175,15 +204,10 @@ export default function Records() {
 
       <div className="page-content with-nav" style={{ paddingTop: 16 }}>
         {/* Month total */}
-        <div
-          style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            padding: '12px 0',
-            marginBottom: 8,
-          }}
-        >
+        <div style={{
+          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+          padding: '12px 0', marginBottom: 8,
+        }}>
           <span style={{ fontSize: 13, color: 'var(--text-3)' }}>
             {filtered.length} {filtered.length === 1 ? 'entry' : 'entries'}
           </span>
@@ -192,43 +216,38 @@ export default function Records() {
           </span>
         </div>
 
-        {/* Category filter chips */}
-        <div
-          style={{
-            display: 'flex',
-            gap: 6,
-            overflowX: 'auto',
-            paddingBottom: 12,
-            marginBottom: 8,
-          }}
-        >
-          {['all', ...categories].map((cat) => (
-            <button
-              key={cat}
-              onClick={() => setFilterCat(cat)}
-              style={{
-                padding: '7px 14px',
-                borderRadius: 20,
-                border: `1.5px solid ${filterCat === cat ? 'var(--accent)' : 'var(--border)'}`,
-                background: filterCat === cat ? 'var(--accent)' : 'var(--card)',
-                color: filterCat === cat ? 'white' : 'var(--text-2)',
-                fontSize: 13,
-                fontWeight: filterCat === cat ? 600 : 400,
-                cursor: 'pointer',
-                fontFamily: 'DM Sans, sans-serif',
-                whiteSpace: 'nowrap',
-                flex: '0 0 auto',
-                textTransform: 'capitalize',
-              }}
-            >
-              {cat === 'all' ? 'All' : cat}
-            </button>
-          ))}
+        {/* Filter chips */}
+        <div style={{ display: 'flex', gap: 6, overflowX: 'auto', paddingBottom: 12, marginBottom: 8 }}>
+          {filterOptions.map((cat) => {
+            const active = filterCat === cat
+            const personColor = getCategoryColor(cat)
+            return (
+              <button
+                key={cat}
+                onClick={() => setFilterCat(cat)}
+                style={{
+                  padding: '7px 14px',
+                  borderRadius: 20,
+                  border: `1.5px solid ${active ? (personColor || 'var(--accent)') : 'var(--border)'}`,
+                  background: active ? (personColor || 'var(--accent)') : 'var(--card)',
+                  color: active ? 'white' : 'var(--text-2)',
+                  fontSize: 13,
+                  fontWeight: active ? 600 : 400,
+                  cursor: 'pointer',
+                  fontFamily: 'DM Sans, sans-serif',
+                  whiteSpace: 'nowrap',
+                  flex: '0 0 auto',
+                  textTransform: 'capitalize',
+                }}
+              >
+                {cat === 'all' ? 'All' : cat}
+              </button>
+            )
+          })}
         </div>
 
-        {/* Edit hint */}
         <p style={{ fontSize: 11, color: 'var(--text-3)', marginBottom: 12, textAlign: 'center' }}>
-          Hold an item for 1 second to edit or delete it
+          Hold an expense for 1 second to edit or delete it
         </p>
 
         {loading ? (
@@ -241,20 +260,14 @@ export default function Records() {
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16, paddingBottom: 8 }}>
             {groupedDates.map((date) => {
-              const dayExpenses = grouped[date]
-              const dayTotal = dayExpenses.reduce((s, e) => s + Number(e.amount), 0)
+              const dayRecords = grouped[date]
+              const dayTotal = dayRecords.reduce((s, r) => s + Number(r.amount), 0)
               return (
                 <div key={date}>
-                  {/* Date header */}
-                  <div
-                    style={{
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      alignItems: 'center',
-                      marginBottom: 8,
-                      padding: '0 2px',
-                    }}
-                  >
+                  <div style={{
+                    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                    marginBottom: 8, padding: '0 2px',
+                  }}>
                     <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-2)' }}>
                       {format(new Date(date + 'T00:00:00'), 'EEEE, d MMM')}
                     </span>
@@ -263,82 +276,81 @@ export default function Records() {
                     </span>
                   </div>
 
-                  {/* Expenses for this date */}
-                  <div
-                    className="card"
-                    style={{ overflow: 'hidden' }}
-                  >
-                    {dayExpenses.map((expense, idx) => {
-                      const isLongPressed = longPressId === expense.id
+                  <div className="card" style={{ overflow: 'hidden' }}>
+                    {dayRecords.map((record, idx) => {
+                      const isLedger = record.source === 'ledger'
+                      const isLongPressed = longPressId === record.id
+                      const personColor = getCategoryColor(record.category)
+
                       return (
                         <div
-                          key={expense.id}
-                          onMouseDown={() => handlePressStart(expense.id)}
+                          key={record.id}
+                          onMouseDown={() => handlePressStart(record.id, isLedger)}
                           onMouseUp={handlePressEnd}
                           onMouseLeave={handlePressEnd}
-                          onTouchStart={() => handlePressStart(expense.id)}
+                          onTouchStart={() => handlePressStart(record.id, isLedger)}
                           onTouchEnd={handlePressEnd}
+                          onClick={() => {
+                            if (isLongPressed && !isLedger) {
+                              const exp = expenses.find((e) => e.id === record.id)
+                              if (exp) setEditExpense(exp)
+                            }
+                          }}
                           style={{
                             display: 'flex',
                             justifyContent: 'space-between',
                             alignItems: 'center',
                             padding: '13px 16px',
-                            borderBottom: idx < dayExpenses.length - 1 ? '1px solid var(--border)' : 'none',
+                            borderBottom: idx < dayRecords.length - 1 ? '1px solid var(--border)' : 'none',
                             background: isLongPressed ? 'var(--bg-3)' : 'transparent',
-                            cursor: 'pointer',
+                            cursor: isLedger ? 'default' : 'pointer',
                             transition: 'background 0.1s',
-                          }}
-                          onClick={() => {
-                            if (isLongPressed) {
-                              setEditExpense(expense)
-                            }
                           }}
                         >
                           <div style={{ flex: 1, minWidth: 0 }}>
-                            <div
-                              style={{
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 2 }}>
+                              {isLedger && (
+                                <span style={{
+                                  fontSize: 10,
+                                  fontWeight: 700,
+                                  padding: '1px 6px',
+                                  borderRadius: 8,
+                                  background: `${personColor}25`,
+                                  color: personColor,
+                                  letterSpacing: '0.03em',
+                                }}>
+                                  {record.category}
+                                </span>
+                              )}
+                              <span style={{
                                 fontSize: 15,
                                 fontWeight: 500,
                                 color: 'var(--text)',
-                                textTransform: 'capitalize',
-                                marginBottom: 2,
-                              }}
-                            >
-                              {expense.item}
-                            </div>
-                            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                              <span
-                                style={{
-                                  fontSize: 11,
-                                  color: 'var(--text-3)',
-                                  textTransform: 'capitalize',
-                                }}
-                              >
-                                {expense.category}
+                                textTransform: isLedger ? 'none' : 'capitalize',
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                                whiteSpace: 'nowrap',
+                              }}>
+                                {isLedger ? (record.notes ? `Cash — ${record.notes}` : 'Cash given') : record.item}
                               </span>
-                              {expense.notes && (
-                                <>
-                                  <span style={{ fontSize: 11, color: 'var(--border)' }}>·</span>
-                                  <span style={{ fontSize: 11, color: 'var(--text-3)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 100 }}>
-                                    {expense.notes}
-                                  </span>
-                                </>
+                            </div>
+                            <div style={{ fontSize: 11, color: 'var(--text-3)', textTransform: 'capitalize' }}>
+                              {isLedger ? `Given to ${record.category}` : getCategoryLabel(record.category)}
+                              {!isLedger && record.notes && (
+                                <span> · <span style={{ maxWidth: 100, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'inline-block', verticalAlign: 'bottom' }}>{record.notes}</span></span>
                               )}
                             </div>
                           </div>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                            {isLongPressed && (
+                            {isLongPressed && !isLedger && (
                               <span style={{ fontSize: 11, color: 'var(--accent)' }}>Tap to edit</span>
                             )}
-                            <span
-                              style={{
-                                fontSize: 15,
-                                fontWeight: 600,
-                                color: 'var(--text)',
-                                letterSpacing: '-0.01em',
-                              }}
-                            >
-                              Rs {Number(expense.amount).toLocaleString('en-IN')}
+                            <span style={{
+                              fontSize: 15, fontWeight: 600,
+                              color: isLedger ? (personColor || 'var(--text)') : 'var(--text)',
+                              letterSpacing: '-0.01em',
+                            }}>
+                              Rs {Number(record.amount).toLocaleString('en-IN')}
                             </span>
                           </div>
                         </div>
