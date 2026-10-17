@@ -4,7 +4,7 @@ import { GROCERY_DICTIONARY, CORRECTIONS_MAP } from '@/lib/dictionary'
 
 export function useAutocorrect(extraWords: string[] = []) {
   const allWords = useMemo(() => {
-    const combined = [...new Set([...GROCERY_DICTIONARY, ...extraWords])]
+    const combined = Array.from(new Set(GROCERY_DICTIONARY.concat(extraWords)))
     return combined
   }, [extraWords])
 
