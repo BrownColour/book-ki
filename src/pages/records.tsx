@@ -7,12 +7,11 @@ import BottomNav from '@/components/BottomNav'
 import EditModal from '@/components/EditModal'
 import Toast from '@/components/Toast'
 
-// Ledger entries are presented as a category named after the person
 function ledgerToUnified(tx: LedgerTransaction): UnifiedRecord {
   return {
     id: tx.id,
     date: tx.date,
-    item: tx.note ? `Cash to ${tx.person} — ${tx.note}` : `Cash to ${tx.person}`,
+    item: tx.note ? `Cash — ${tx.note}` : 'Cash given',
     category: tx.person,
     amount: tx.amount,
     notes: undefined,
@@ -38,6 +37,165 @@ const PERSON_COLORS: Record<string, string> = {
   L: '#C4923A',
 }
 
+// ── Ledger edit sheet ──────────────────────────────────────────────────────
+interface LedgerEditSheetProps {
+  tx: LedgerTransaction | null
+  onClose: () => void
+  onSave: (id: string, data: Partial<LedgerTransaction>) => Promise<void>
+  onDelete: (id: string) => Promise<void>
+}
+
+type LedgerStep = 'confirm' | 'edit'
+
+function LedgerEditSheet({ tx, onClose, onSave, onDelete }: LedgerEditSheetProps) {
+  const [step, setStep] = useState<LedgerStep>('confirm')
+  const [amount, setAmount] = useState('')
+  const [note, setNote] = useState('')
+  const [date, setDate] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+
+  useEffect(() => {
+    if (tx) {
+      setAmount(tx.amount.toString())
+      setNote(tx.note || '')
+      setDate(tx.date)
+      setStep('confirm')
+      setShowDeleteConfirm(false)
+    }
+  }, [tx])
+
+  if (!tx) return null
+
+  const color = PERSON_COLORS[tx.person] || 'var(--accent)'
+
+  const handleSave = async () => {
+    if (!amount || parseFloat(amount) <= 0) return
+    setSaving(true)
+    await onSave(tx.id, {
+      amount: parseFloat(amount),
+      note: note.trim() || undefined,
+      date,
+    })
+    setSaving(false)
+    onClose()
+  }
+
+  const handleDelete = async () => {
+    setSaving(true)
+    await onDelete(tx.id)
+    setSaving(false)
+    onClose()
+  }
+
+  return (
+    <div
+      style={{
+        position: 'fixed', inset: 0, zIndex: 200,
+        display: 'flex', alignItems: 'flex-end',
+        background: 'rgba(0,0,0,0.5)',
+      }}
+      onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
+    >
+      <div style={{
+        width: '100%', maxWidth: 480, margin: '0 auto',
+        background: 'var(--card)', borderRadius: '20px 20px 0 0',
+        padding: '20px 20px calc(20px + env(safe-area-inset-bottom, 0px))',
+        maxHeight: '90dvh', overflowY: 'auto',
+      }}>
+        <div style={{ width: 36, height: 4, background: 'var(--border)', borderRadius: 2, margin: '0 auto 20px' }} />
+
+        {step === 'confirm' ? (
+          <>
+            <h2 style={{ fontSize: 18, fontWeight: 700, margin: '0 0 8px', color: 'var(--text)' }}>
+              Edit this entry?
+            </h2>
+            <p style={{ fontSize: 14, color: 'var(--text-2)', margin: '0 0 20px', lineHeight: 1.5 }}>
+              You are about to edit a cash entry for <strong style={{ color }}>{tx.person}</strong> — Rs {tx.amount}. Are you sure?
+            </p>
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button className="btn-secondary" onClick={onClose} style={{ flex: 1 }}>No, go back</button>
+              <button className="btn-primary" onClick={() => setStep('edit')} style={{ flex: 1 }}>Yes, edit</button>
+            </div>
+          </>
+        ) : (
+          <>
+            <h2 style={{ fontSize: 18, fontWeight: 700, margin: '0 0 4px', color }}>
+              Edit — {tx.person}
+            </h2>
+            <p style={{ fontSize: 13, color: 'var(--text-3)', margin: '0 0 20px' }}>
+              {format(new Date(tx.date + 'T00:00:00'), 'd MMMM yyyy')}
+            </p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <div>
+                <label className="label">Amount (Rs)</label>
+                <input type="number" className="input-field" value={amount}
+                  onChange={(e) => setAmount(e.target.value)}
+                  placeholder="0" inputMode="numeric"
+                  style={{ fontSize: 20, fontWeight: 600 }} />
+              </div>
+              <div>
+                <label className="label">Date</label>
+                <input type="date" className="input-field" value={date}
+                  onChange={(e) => setDate(e.target.value)} />
+              </div>
+              <div>
+                <label className="label">Note (optional)</label>
+                <input type="text" className="input-field" value={note}
+                  onChange={(e) => setNote(e.target.value)}
+                  placeholder="Daily sabzi, market, etc." />
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', gap: 10, marginTop: 20 }}>
+              <button className="btn-secondary" onClick={onClose} style={{ flex: 1 }}>Cancel</button>
+              <button className="btn-primary" onClick={handleSave}
+                disabled={saving || !amount}
+                style={{ flex: 2, opacity: saving || !amount ? 0.5 : 1 }}>
+                {saving ? 'Saving...' : 'Save'}
+              </button>
+            </div>
+
+            {!showDeleteConfirm ? (
+              <button onClick={() => setShowDeleteConfirm(true)} style={{
+                marginTop: 12, width: '100%', padding: '12px',
+                border: '1px solid #c0392b', borderRadius: 10,
+                background: 'transparent', color: '#c0392b',
+                fontSize: 14, fontWeight: 500, cursor: 'pointer',
+                fontFamily: 'DM Sans, sans-serif',
+              }}>
+                Delete entry
+              </button>
+            ) : (
+              <div style={{ marginTop: 12, padding: 14, borderRadius: 10, border: '1px solid #c0392b', background: '#c0392b18' }}>
+                <p style={{ fontSize: 13, color: '#c0392b', margin: '0 0 10px', fontWeight: 500 }}>
+                  This will permanently delete this entry. Cannot be undone.
+                </p>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button onClick={() => setShowDeleteConfirm(false)} style={{
+                    flex: 1, padding: '10px', border: '1px solid var(--border)',
+                    borderRadius: 8, background: 'var(--bg-3)', color: 'var(--text)',
+                    fontSize: 13, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif',
+                  }}>Cancel</button>
+                  <button onClick={handleDelete} disabled={saving} style={{
+                    flex: 1, padding: '10px', border: 'none', borderRadius: 8,
+                    background: '#c0392b', color: 'white', fontSize: 13,
+                    fontWeight: 600, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif',
+                    opacity: saving ? 0.7 : 1,
+                  }}>
+                    {saving ? 'Deleting...' : 'Yes, delete'}
+                  </button>
+                </div>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ── Main page ──────────────────────────────────────────────────────────────
 export default function Records() {
   const [expenses, setExpenses] = useState<Expense[]>([])
   const [ledgerTx, setLedgerTx] = useState<LedgerTransaction[]>([])
@@ -46,6 +204,7 @@ export default function Records() {
   const [loading, setLoading] = useState(true)
   const [filterCat, setFilterCat] = useState<string>('all')
   const [editExpense, setEditExpense] = useState<Expense | null>(null)
+  const [editLedger, setEditLedger] = useState<LedgerTransaction | null>(null)
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null)
   const [longPressId, setLongPressId] = useState<string | null>(null)
 
@@ -59,8 +218,7 @@ export default function Records() {
   useEffect(() => { loadCategories() }, [])
 
   const loadCategories = async () => {
-    const { data } = await supabase
-      .from('app_settings').select('value').eq('key', 'categories').single()
+    const { data } = await supabase.from('app_settings').select('value').eq('key', 'categories').single()
     if (data) setCategories(data.value as string[])
   }
 
@@ -69,19 +227,16 @@ export default function Records() {
     const [expRes, ledRes] = await Promise.all([
       supabase.from('expenses').select('*')
         .gte('date', monthStart).lte('date', monthEnd)
-        .order('date', { ascending: false })
-        .order('created_at', { ascending: false }),
+        .order('date', { ascending: false }).order('created_at', { ascending: false }),
       supabase.from('ledger_transactions').select('*')
         .gte('date', monthStart).lte('date', monthEnd)
-        .order('date', { ascending: false })
-        .order('created_at', { ascending: false }),
+        .order('date', { ascending: false }).order('created_at', { ascending: false }),
     ])
     setExpenses(expRes.data || [])
     setLedgerTx(ledRes.data || [])
     setLoading(false)
   }
 
-  // Merge and sort all records by date desc
   const allUnified: UnifiedRecord[] = [
     ...expenses.map(expenseToUnified),
     ...ledgerTx.map(ledgerToUnified),
@@ -91,27 +246,30 @@ export default function Records() {
   const filtered = filterCat === 'all' ? allUnified : allUnified.filter((r) => r.category === filterCat)
   const total = filtered.reduce((s, r) => s + Number(r.amount), 0)
 
-  const handleSave = async (id: string, data: Partial<Expense>) => {
+  const handleSaveExpense = async (id: string, data: Partial<Expense>) => {
     const { error } = await supabase.from('expenses').update(data).eq('id', id)
-    if (error) {
-      setToast({ message: 'Could not save changes', type: 'error' })
-    } else {
-      setToast({ message: 'Record updated', type: 'success' })
-      loadData()
-    }
+    if (error) { setToast({ message: 'Could not save changes', type: 'error' }) }
+    else { setToast({ message: 'Record updated', type: 'success' }); loadData() }
   }
 
-  const handleDelete = async (id: string) => {
+  const handleDeleteExpense = async (id: string) => {
     const { error } = await supabase.from('expenses').delete().eq('id', id)
-    if (error) {
-      setToast({ message: 'Could not delete', type: 'error' })
-    } else {
-      setToast({ message: 'Record deleted', type: 'success' })
-      loadData()
-    }
+    if (error) { setToast({ message: 'Could not delete', type: 'error' }) }
+    else { setToast({ message: 'Record deleted', type: 'success' }); loadData() }
   }
 
-  // Group by date
+  const handleSaveLedger = async (id: string, data: Partial<LedgerTransaction>) => {
+    const { error } = await supabase.from('ledger_transactions').update(data).eq('id', id)
+    if (error) { setToast({ message: 'Could not save changes', type: 'error' }) }
+    else { setToast({ message: 'Entry updated', type: 'success' }); loadData() }
+  }
+
+  const handleDeleteLedger = async (id: string) => {
+    const { error } = await supabase.from('ledger_transactions').delete().eq('id', id)
+    if (error) { setToast({ message: 'Could not delete', type: 'error' }) }
+    else { setToast({ message: 'Entry deleted', type: 'success' }); loadData() }
+  }
+
   const grouped: Record<string, UnifiedRecord[]> = {}
   filtered.forEach((r) => {
     if (!grouped[r.date]) grouped[r.date] = []
@@ -120,32 +278,38 @@ export default function Records() {
   const groupedDates = Object.keys(grouped).sort((a, b) => b.localeCompare(a))
 
   let pressTimer: NodeJS.Timeout
-  const handlePressStart = (id: string, isLedger: boolean) => {
-    if (isLedger) return // ledger entries are not editable here
+  const handlePressStart = (id: string) => {
     pressTimer = setTimeout(() => setLongPressId(id), 600)
   }
   const handlePressEnd = () => clearTimeout(pressTimer)
 
-  const getCategoryLabel = (cat: string) => {
-    if (['H', 'S', 'L'].includes(cat)) return `Cash — ${cat}`
-    return cat.charAt(0).toUpperCase() + cat.slice(1)
-  }
-
-  const getCategoryColor = (cat: string) => {
-    return PERSON_COLORS[cat] || undefined
+  const openEdit = (record: UnifiedRecord) => {
+    setLongPressId(null)
+    if (record.source === 'expense') {
+      const exp = expenses.find((e) => e.id === record.id)
+      if (exp) setEditExpense(exp)
+    } else {
+      const tx = ledgerTx.find((t) => t.id === record.id)
+      if (tx) setEditLedger(tx)
+    }
   }
 
   return (
     <div style={{ minHeight: '100dvh', background: 'var(--bg)' }}>
-      {toast && (
-        <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />
-      )}
+      {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
+
       <EditModal
         expense={editExpense}
         categories={categories}
-        onClose={() => { setEditExpense(null); setLongPressId(null) }}
-        onSave={handleSave}
-        onDelete={handleDelete}
+        onClose={() => setEditExpense(null)}
+        onSave={handleSaveExpense}
+        onDelete={handleDeleteExpense}
+      />
+      <LedgerEditSheet
+        tx={editLedger}
+        onClose={() => setEditLedger(null)}
+        onSave={handleSaveLedger}
+        onDelete={handleDeleteLedger}
       />
 
       <PageHeader
@@ -156,16 +320,10 @@ export default function Records() {
             <button
               onClick={() => exportToCSV(filtered, monthKey)}
               style={{
-                height: 32,
-                padding: '0 10px',
-                borderRadius: 8,
-                border: '1px solid var(--border)',
-                background: 'var(--bg-3)',
-                color: 'var(--text-2)',
-                cursor: 'pointer',
-                fontSize: 12,
-                fontWeight: 500,
-                fontFamily: 'DM Sans, sans-serif',
+                height: 32, padding: '0 10px', borderRadius: 8,
+                border: '1px solid var(--border)', background: 'var(--bg-3)',
+                color: 'var(--text-2)', cursor: 'pointer', fontSize: 12,
+                fontWeight: 500, fontFamily: 'DM Sans, sans-serif',
               }}
             >
               Export CSV
@@ -203,7 +361,6 @@ export default function Records() {
       />
 
       <div className="page-content with-nav" style={{ paddingTop: 16 }}>
-        {/* Month total */}
         <div style={{
           display: 'flex', justifyContent: 'space-between', alignItems: 'center',
           padding: '12px 0', marginBottom: 8,
@@ -220,26 +377,17 @@ export default function Records() {
         <div style={{ display: 'flex', gap: 6, overflowX: 'auto', paddingBottom: 12, marginBottom: 8 }}>
           {filterOptions.map((cat) => {
             const active = filterCat === cat
-            const personColor = getCategoryColor(cat)
+            const personColor = PERSON_COLORS[cat]
             return (
-              <button
-                key={cat}
-                onClick={() => setFilterCat(cat)}
-                style={{
-                  padding: '7px 14px',
-                  borderRadius: 20,
-                  border: `1.5px solid ${active ? (personColor || 'var(--accent)') : 'var(--border)'}`,
-                  background: active ? (personColor || 'var(--accent)') : 'var(--card)',
-                  color: active ? 'white' : 'var(--text-2)',
-                  fontSize: 13,
-                  fontWeight: active ? 600 : 400,
-                  cursor: 'pointer',
-                  fontFamily: 'DM Sans, sans-serif',
-                  whiteSpace: 'nowrap',
-                  flex: '0 0 auto',
-                  textTransform: 'capitalize',
-                }}
-              >
+              <button key={cat} onClick={() => setFilterCat(cat)} style={{
+                padding: '7px 14px', borderRadius: 20, flex: '0 0 auto',
+                border: `1.5px solid ${active ? (personColor || 'var(--accent)') : 'var(--border)'}`,
+                background: active ? (personColor || 'var(--accent)') : 'var(--card)',
+                color: active ? 'white' : 'var(--text-2)',
+                fontSize: 13, fontWeight: active ? 600 : 400,
+                cursor: 'pointer', fontFamily: 'DM Sans, sans-serif',
+                whiteSpace: 'nowrap', textTransform: 'capitalize',
+              }}>
                 {cat === 'all' ? 'All' : cat}
               </button>
             )
@@ -247,7 +395,7 @@ export default function Records() {
         </div>
 
         <p style={{ fontSize: 11, color: 'var(--text-3)', marginBottom: 12, textAlign: 'center' }}>
-          Hold an expense for 1 second to edit or delete it
+          Hold any entry for 1 second to edit or delete it
         </p>
 
         {loading ? (
@@ -280,75 +428,56 @@ export default function Records() {
                     {dayRecords.map((record, idx) => {
                       const isLedger = record.source === 'ledger'
                       const isLongPressed = longPressId === record.id
-                      const personColor = getCategoryColor(record.category)
+                      const personColor = PERSON_COLORS[record.category]
 
                       return (
                         <div
                           key={record.id}
-                          onMouseDown={() => handlePressStart(record.id, isLedger)}
+                          onMouseDown={() => handlePressStart(record.id)}
                           onMouseUp={handlePressEnd}
                           onMouseLeave={handlePressEnd}
-                          onTouchStart={() => handlePressStart(record.id, isLedger)}
+                          onTouchStart={() => handlePressStart(record.id)}
                           onTouchEnd={handlePressEnd}
-                          onClick={() => {
-                            if (isLongPressed && !isLedger) {
-                              const exp = expenses.find((e) => e.id === record.id)
-                              if (exp) setEditExpense(exp)
-                            }
-                          }}
+                          onClick={() => { if (isLongPressed) openEdit(record) }}
                           style={{
-                            display: 'flex',
-                            justifyContent: 'space-between',
-                            alignItems: 'center',
+                            display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                             padding: '13px 16px',
                             borderBottom: idx < dayRecords.length - 1 ? '1px solid var(--border)' : 'none',
                             background: isLongPressed ? 'var(--bg-3)' : 'transparent',
-                            cursor: isLedger ? 'default' : 'pointer',
-                            transition: 'background 0.1s',
+                            cursor: 'pointer', transition: 'background 0.1s',
                           }}
                         >
                           <div style={{ flex: 1, minWidth: 0 }}>
                             <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 2 }}>
                               {isLedger && (
                                 <span style={{
-                                  fontSize: 10,
-                                  fontWeight: 700,
-                                  padding: '1px 6px',
-                                  borderRadius: 8,
-                                  background: `${personColor}25`,
-                                  color: personColor,
-                                  letterSpacing: '0.03em',
+                                  fontSize: 10, fontWeight: 700, padding: '1px 6px',
+                                  borderRadius: 8, letterSpacing: '0.03em',
+                                  background: `${personColor}25`, color: personColor,
                                 }}>
                                   {record.category}
                                 </span>
                               )}
                               <span style={{
-                                fontSize: 15,
-                                fontWeight: 500,
-                                color: 'var(--text)',
+                                fontSize: 15, fontWeight: 500, color: 'var(--text)',
                                 textTransform: isLedger ? 'none' : 'capitalize',
-                                overflow: 'hidden',
-                                textOverflow: 'ellipsis',
-                                whiteSpace: 'nowrap',
+                                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                               }}>
-                                {isLedger ? (record.notes ? `Cash — ${record.notes}` : 'Cash given') : record.item}
+                                {record.item}
                               </span>
                             </div>
                             <div style={{ fontSize: 11, color: 'var(--text-3)', textTransform: 'capitalize' }}>
-                              {isLedger ? `Given to ${record.category}` : getCategoryLabel(record.category)}
-                              {!isLedger && record.notes && (
-                                <span> · <span style={{ maxWidth: 100, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'inline-block', verticalAlign: 'bottom' }}>{record.notes}</span></span>
-                              )}
+                              {isLedger ? `Given to ${record.category}` : record.category}
+                              {!isLedger && record.notes && ` · ${record.notes}`}
                             </div>
                           </div>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                            {isLongPressed && !isLedger && (
+                            {isLongPressed && (
                               <span style={{ fontSize: 11, color: 'var(--accent)' }}>Tap to edit</span>
                             )}
                             <span style={{
-                              fontSize: 15, fontWeight: 600,
+                              fontSize: 15, fontWeight: 600, letterSpacing: '-0.01em',
                               color: isLedger ? (personColor || 'var(--text)') : 'var(--text)',
-                              letterSpacing: '-0.01em',
                             }}>
                               Rs {Number(record.amount).toLocaleString('en-IN')}
                             </span>
