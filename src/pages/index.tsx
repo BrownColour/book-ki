@@ -224,7 +224,7 @@ export default function AddExpense() {
             lineHeight: 1.5,
           }}
         >
-          If the spelling looks wrong, tap the suggestion below the item name.
+
         </p>
       </div>
 
