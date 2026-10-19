@@ -13,7 +13,7 @@ function ledgerToUnified(tx: LedgerTransaction): UnifiedRecord {
     date: tx.date,
     item: tx.note ? `Cash — ${tx.note}` : 'Cash given',
     category: tx.person,
-    amount: tx.amount,
+    amount: tx.type === 'returned' ? -tx.amount : tx.amount,
     notes: undefined,
     source: 'ledger',
   }
@@ -66,17 +66,12 @@ function LedgerEditSheet({ tx, onClose, onSave, onDelete }: LedgerEditSheetProps
   }, [tx])
 
   if (!tx) return null
-
   const color = PERSON_COLORS[tx.person] || 'var(--accent)'
 
   const handleSave = async () => {
     if (!amount || parseFloat(amount) <= 0) return
     setSaving(true)
-    await onSave(tx.id, {
-      amount: parseFloat(amount),
-      note: note.trim() || undefined,
-      date,
-    })
+    await onSave(tx.id, { amount: parseFloat(amount), note: note.trim() || undefined, date })
     setSaving(false)
     onClose()
   }
@@ -90,11 +85,7 @@ function LedgerEditSheet({ tx, onClose, onSave, onDelete }: LedgerEditSheetProps
 
   return (
     <div
-      style={{
-        position: 'fixed', inset: 0, zIndex: 200,
-        display: 'flex', alignItems: 'flex-end',
-        background: 'rgba(0,0,0,0.5)',
-      }}
+      style={{ position: 'fixed', inset: 0, zIndex: 200, display: 'flex', alignItems: 'flex-end', background: 'rgba(0,0,0,0.5)' }}
       onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
     >
       <div style={{
@@ -107,9 +98,7 @@ function LedgerEditSheet({ tx, onClose, onSave, onDelete }: LedgerEditSheetProps
 
         {step === 'confirm' ? (
           <>
-            <h2 style={{ fontSize: 18, fontWeight: 700, margin: '0 0 8px', color: 'var(--text)' }}>
-              Edit this entry?
-            </h2>
+            <h2 style={{ fontSize: 18, fontWeight: 700, margin: '0 0 8px', color: 'var(--text)' }}>Edit this entry?</h2>
             <p style={{ fontSize: 14, color: 'var(--text-2)', margin: '0 0 20px', lineHeight: 1.5 }}>
               You are about to edit a cash entry for <strong style={{ color }}>{tx.person}</strong> — Rs {tx.amount}. Are you sure?
             </p>
@@ -120,9 +109,7 @@ function LedgerEditSheet({ tx, onClose, onSave, onDelete }: LedgerEditSheetProps
           </>
         ) : (
           <>
-            <h2 style={{ fontSize: 18, fontWeight: 700, margin: '0 0 4px', color }}>
-              Edit — {tx.person}
-            </h2>
+            <h2 style={{ fontSize: 18, fontWeight: 700, margin: '0 0 4px', color }}>Edit — {tx.person}</h2>
             <p style={{ fontSize: 13, color: 'var(--text-3)', margin: '0 0 20px' }}>
               {format(new Date(tx.date + 'T00:00:00'), 'd MMMM yyyy')}
             </p>
@@ -130,42 +117,32 @@ function LedgerEditSheet({ tx, onClose, onSave, onDelete }: LedgerEditSheetProps
               <div>
                 <label className="label">Amount (Rs)</label>
                 <input type="number" className="input-field" value={amount}
-                  onChange={(e) => setAmount(e.target.value)}
-                  placeholder="0" inputMode="numeric"
+                  onChange={(e) => setAmount(e.target.value)} placeholder="0" inputMode="numeric"
                   style={{ fontSize: 20, fontWeight: 600 }} />
               </div>
               <div>
                 <label className="label">Date</label>
-                <input type="date" className="input-field" value={date}
-                  onChange={(e) => setDate(e.target.value)} />
+                <input type="date" className="input-field" value={date} onChange={(e) => setDate(e.target.value)} />
               </div>
               <div>
                 <label className="label">Note (optional)</label>
                 <input type="text" className="input-field" value={note}
-                  onChange={(e) => setNote(e.target.value)}
-                  placeholder="Daily sabzi, market, etc." />
+                  onChange={(e) => setNote(e.target.value)} placeholder="Daily sabzi, market, etc." />
               </div>
             </div>
-
             <div style={{ display: 'flex', gap: 10, marginTop: 20 }}>
               <button className="btn-secondary" onClick={onClose} style={{ flex: 1 }}>Cancel</button>
-              <button className="btn-primary" onClick={handleSave}
-                disabled={saving || !amount}
+              <button className="btn-primary" onClick={handleSave} disabled={saving || !amount}
                 style={{ flex: 2, opacity: saving || !amount ? 0.5 : 1 }}>
                 {saving ? 'Saving...' : 'Save'}
               </button>
             </div>
-
             {!showDeleteConfirm ? (
               <button onClick={() => setShowDeleteConfirm(true)} style={{
-                marginTop: 12, width: '100%', padding: '12px',
-                border: '1px solid #c0392b', borderRadius: 10,
-                background: 'transparent', color: '#c0392b',
-                fontSize: 14, fontWeight: 500, cursor: 'pointer',
-                fontFamily: 'DM Sans, sans-serif',
-              }}>
-                Delete entry
-              </button>
+                marginTop: 12, width: '100%', padding: '12px', border: '1px solid #c0392b',
+                borderRadius: 10, background: 'transparent', color: '#c0392b',
+                fontSize: 14, fontWeight: 500, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif',
+              }}>Delete entry</button>
             ) : (
               <div style={{ marginTop: 12, padding: 14, borderRadius: 10, border: '1px solid #c0392b', background: '#c0392b18' }}>
                 <p style={{ fontSize: 13, color: '#c0392b', margin: '0 0 10px', fontWeight: 500 }}>
@@ -173,18 +150,15 @@ function LedgerEditSheet({ tx, onClose, onSave, onDelete }: LedgerEditSheetProps
                 </p>
                 <div style={{ display: 'flex', gap: 8 }}>
                   <button onClick={() => setShowDeleteConfirm(false)} style={{
-                    flex: 1, padding: '10px', border: '1px solid var(--border)',
-                    borderRadius: 8, background: 'var(--bg-3)', color: 'var(--text)',
-                    fontSize: 13, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif',
+                    flex: 1, padding: '10px', border: '1px solid var(--border)', borderRadius: 8,
+                    background: 'var(--bg-3)', color: 'var(--text)', fontSize: 13,
+                    cursor: 'pointer', fontFamily: 'DM Sans, sans-serif',
                   }}>Cancel</button>
                   <button onClick={handleDelete} disabled={saving} style={{
                     flex: 1, padding: '10px', border: 'none', borderRadius: 8,
-                    background: '#c0392b', color: 'white', fontSize: 13,
-                    fontWeight: 600, cursor: 'pointer', fontFamily: 'DM Sans, sans-serif',
-                    opacity: saving ? 0.7 : 1,
-                  }}>
-                    {saving ? 'Deleting...' : 'Yes, delete'}
-                  </button>
+                    background: '#c0392b', color: 'white', fontSize: 13, fontWeight: 600,
+                    cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', opacity: saving ? 0.7 : 1,
+                  }}>{saving ? 'Deleting...' : 'Yes, delete'}</button>
                 </div>
               </div>
             )}
@@ -244,26 +218,25 @@ export default function Records() {
 
   const filterOptions = ['all', ...categories, 'H', 'S', 'L']
   const filtered = filterCat === 'all' ? allUnified : allUnified.filter((r) => r.category === filterCat)
-  const total = filtered.reduce((s, r) => s + Number(r.amount), 0)
+
+  // Net outflow: expenses + ledger given - ledger returned
+  const netTotal = filtered.reduce((s, r) => s + r.amount, 0)
 
   const handleSaveExpense = async (id: string, data: Partial<Expense>) => {
     const { error } = await supabase.from('expenses').update(data).eq('id', id)
     if (error) { setToast({ message: 'Could not save changes', type: 'error' }) }
     else { setToast({ message: 'Record updated', type: 'success' }); loadData() }
   }
-
   const handleDeleteExpense = async (id: string) => {
     const { error } = await supabase.from('expenses').delete().eq('id', id)
     if (error) { setToast({ message: 'Could not delete', type: 'error' }) }
     else { setToast({ message: 'Record deleted', type: 'success' }); loadData() }
   }
-
   const handleSaveLedger = async (id: string, data: Partial<LedgerTransaction>) => {
     const { error } = await supabase.from('ledger_transactions').update(data).eq('id', id)
     if (error) { setToast({ message: 'Could not save changes', type: 'error' }) }
     else { setToast({ message: 'Entry updated', type: 'success' }); loadData() }
   }
-
   const handleDeleteLedger = async (id: string) => {
     const { error } = await supabase.from('ledger_transactions').delete().eq('id', id)
     if (error) { setToast({ message: 'Could not delete', type: 'error' }) }
@@ -278,9 +251,7 @@ export default function Records() {
   const groupedDates = Object.keys(grouped).sort((a, b) => b.localeCompare(a))
 
   let pressTimer: NodeJS.Timeout
-  const handlePressStart = (id: string) => {
-    pressTimer = setTimeout(() => setLongPressId(id), 600)
-  }
+  const handlePressStart = (id: string) => { pressTimer = setTimeout(() => setLongPressId(id), 600) }
   const handlePressEnd = () => clearTimeout(pressTimer)
 
   const openEdit = (record: UnifiedRecord) => {
@@ -297,79 +268,47 @@ export default function Records() {
   return (
     <div style={{ minHeight: '100dvh', background: 'var(--bg)' }}>
       {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
+      <EditModal expense={editExpense} categories={categories}
+        onClose={() => setEditExpense(null)} onSave={handleSaveExpense} onDelete={handleDeleteExpense} />
+      <LedgerEditSheet tx={editLedger} onClose={() => setEditLedger(null)}
+        onSave={handleSaveLedger} onDelete={handleDeleteLedger} />
 
-      <EditModal
-        expense={editExpense}
-        categories={categories}
-        onClose={() => setEditExpense(null)}
-        onSave={handleSaveExpense}
-        onDelete={handleDeleteExpense}
-      />
-      <LedgerEditSheet
-        tx={editLedger}
-        onClose={() => setEditLedger(null)}
-        onSave={handleSaveLedger}
-        onDelete={handleDeleteLedger}
-      />
-
-      <PageHeader
-        title="Records"
-        subtitle={monthLabel}
-        action={
-          <div style={{ display: 'flex', gap: 4 }}>
-            <button
-              onClick={() => exportToCSV(filtered, monthKey)}
-              style={{
-                height: 32, padding: '0 10px', borderRadius: 8,
-                border: '1px solid var(--border)', background: 'var(--bg-3)',
-                color: 'var(--text-2)', cursor: 'pointer', fontSize: 12,
-                fontWeight: 500, fontFamily: 'DM Sans, sans-serif',
-              }}
-            >
-              Export CSV
-            </button>
-            <button
-              onClick={() => setMonthOffset((o) => o + 1)}
-              style={{
-                width: 32, height: 32, borderRadius: 8,
-                border: '1px solid var(--border)', background: 'var(--bg-3)',
-                color: 'var(--text-2)', cursor: 'pointer',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-              }}
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <polyline points="15 18 9 12 15 6" />
-              </svg>
-            </button>
-            <button
-              onClick={() => setMonthOffset((o) => Math.max(0, o - 1))}
-              disabled={monthOffset === 0}
-              style={{
-                width: 32, height: 32, borderRadius: 8,
-                border: '1px solid var(--border)', background: 'var(--bg-3)',
-                color: monthOffset === 0 ? 'var(--text-3)' : 'var(--text-2)',
-                cursor: monthOffset === 0 ? 'default' : 'pointer',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-              }}
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <polyline points="9 18 15 12 9 6" />
-              </svg>
-            </button>
-          </div>
-        }
-      />
+      <PageHeader title="Records" subtitle={monthLabel} action={
+        <div style={{ display: 'flex', gap: 4 }}>
+          <button onClick={() => exportToCSV(filtered, monthKey)} style={{
+            height: 32, padding: '0 10px', borderRadius: 8, border: '1px solid var(--border)',
+            background: 'var(--bg-3)', color: 'var(--text-2)', cursor: 'pointer',
+            fontSize: 12, fontWeight: 500, fontFamily: 'DM Sans, sans-serif',
+          }}>Export CSV</button>
+          <button onClick={() => setMonthOffset((o) => o + 1)} style={{
+            width: 32, height: 32, borderRadius: 8, border: '1px solid var(--border)',
+            background: 'var(--bg-3)', color: 'var(--text-2)', cursor: 'pointer',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6" /></svg>
+          </button>
+          <button onClick={() => setMonthOffset((o) => Math.max(0, o - 1))} disabled={monthOffset === 0} style={{
+            width: 32, height: 32, borderRadius: 8, border: '1px solid var(--border)',
+            background: 'var(--bg-3)', color: monthOffset === 0 ? 'var(--text-3)' : 'var(--text-2)',
+            cursor: monthOffset === 0 ? 'default' : 'pointer',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6" /></svg>
+          </button>
+        </div>
+      } />
 
       <div className="page-content with-nav" style={{ paddingTop: 16 }}>
+        {/* Net total */}
         <div style={{
           display: 'flex', justifyContent: 'space-between', alignItems: 'center',
           padding: '12px 0', marginBottom: 8,
         }}>
           <span style={{ fontSize: 13, color: 'var(--text-3)' }}>
-            {filtered.length} {filtered.length === 1 ? 'entry' : 'entries'}
+            {filtered.length} {filtered.length === 1 ? 'entry' : 'entries'} · net outflow
           </span>
           <span style={{ fontSize: 17, fontWeight: 700, color: 'var(--accent)', letterSpacing: '-0.02em' }}>
-            Rs {total.toLocaleString('en-IN')}
+            Rs {netTotal.toLocaleString('en-IN')}
           </span>
         </div>
 
@@ -409,7 +348,8 @@ export default function Records() {
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16, paddingBottom: 8 }}>
             {groupedDates.map((date) => {
               const dayRecords = grouped[date]
-              const dayTotal = dayRecords.reduce((s, r) => s + Number(r.amount), 0)
+              // Day total is also net (returned entries have negative amount)
+              const dayTotal = dayRecords.reduce((s, r) => s + r.amount, 0)
               return (
                 <div key={date}>
                   <div style={{
@@ -429,6 +369,9 @@ export default function Records() {
                       const isLedger = record.source === 'ledger'
                       const isLongPressed = longPressId === record.id
                       const personColor = PERSON_COLORS[record.category]
+                      // For display, always show the raw positive amount with a sign label
+                      const rawTx = isLedger ? ledgerTx.find((t) => t.id === record.id) : null
+                      const isReturned = rawTx?.type === 'returned'
 
                       return (
                         <div
@@ -451,8 +394,8 @@ export default function Records() {
                             <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 2 }}>
                               {isLedger && (
                                 <span style={{
-                                  fontSize: 10, fontWeight: 700, padding: '1px 6px',
-                                  borderRadius: 8, letterSpacing: '0.03em',
+                                  fontSize: 10, fontWeight: 700, padding: '1px 6px', borderRadius: 8,
+                                  letterSpacing: '0.03em',
                                   background: `${personColor}25`, color: personColor,
                                 }}>
                                   {record.category}
@@ -467,7 +410,9 @@ export default function Records() {
                               </span>
                             </div>
                             <div style={{ fontSize: 11, color: 'var(--text-3)', textTransform: 'capitalize' }}>
-                              {isLedger ? `Given to ${record.category}` : record.category}
+                              {isLedger
+                                ? isReturned ? `Returned by ${record.category}` : `Given to ${record.category}`
+                                : record.category}
                               {!isLedger && record.notes && ` · ${record.notes}`}
                             </div>
                           </div>
@@ -477,9 +422,9 @@ export default function Records() {
                             )}
                             <span style={{
                               fontSize: 15, fontWeight: 600, letterSpacing: '-0.01em',
-                              color: isLedger ? (personColor || 'var(--text)') : 'var(--text)',
+                              color: isReturned ? '#7B9E87' : isLedger ? (personColor || 'var(--text)') : 'var(--text)',
                             }}>
-                              Rs {Number(record.amount).toLocaleString('en-IN')}
+                              {isReturned ? '+' : ''}Rs {Math.abs(Number(rawTx?.amount ?? record.amount)).toLocaleString('en-IN')}
                             </span>
                           </div>
                         </div>
@@ -492,7 +437,6 @@ export default function Records() {
           </div>
         )}
       </div>
-
       <BottomNav />
     </div>
   )
