@@ -6,9 +6,13 @@ import BottomNav from '@/components/BottomNav'
 import AutocorrectInput from '@/components/AutocorrectInput'
 import Toast from '@/components/Toast'
 
+interface ItemRow {
+  name: string
+  amount: string
+}
+
 export default function AddExpense() {
-  const [items, setItems] = useState<string[]>([''])
-  const [amount, setAmount] = useState('')
+  const [items, setItems] = useState<ItemRow[]>([{ name: '', amount: '' }])
   const [category, setCategory] = useState('vegetables')
   const [notes, setNotes] = useState('')
   const [date, setDate] = useState(format(new Date(), 'yyyy-MM-dd'))
@@ -37,29 +41,37 @@ export default function AddExpense() {
     if (data) setTodayTotal(data.reduce((sum, e) => sum + Number(e.amount), 0))
   }
 
-  const updateItem = (index: number, value: string) => {
-    setItems((prev) => prev.map((it, i) => (i === index ? value : it)))
+  const updateItem = (index: number, field: keyof ItemRow, value: string) => {
+    setItems((prev) => prev.map((row, i) => i === index ? { ...row, [field]: value } : row))
   }
 
-  const addItemField = () => {
-    setItems((prev) => [...prev, ''])
-  }
+  const addItemRow = () => setItems((prev) => [...prev, { name: '', amount: '' }])
 
-  const removeItemField = (index: number) => {
-    setItems((prev) => prev.filter((_, i) => i !== index))
-  }
+  const removeItemRow = (index: number) => setItems((prev) => prev.filter((_, i) => i !== index))
+
+  // Auto-sum of all item amounts
+  const totalAmount = items.reduce((sum, row) => {
+    const val = parseFloat(row.amount)
+    return sum + (isNaN(val) ? 0 : val)
+  }, 0)
+
+  const hasValidItem = items.some((row) => row.name.trim().length > 0)
+  const canSubmit = hasValidItem && totalAmount > 0
 
   const handleSubmit = async () => {
-    const filledItems = items.map((it) => it.trim()).filter(Boolean)
-    if (filledItems.length === 0 || !amount || parseFloat(amount) <= 0) {
-      setToast({ message: 'Please fill in item and amount', type: 'error' })
+    if (!canSubmit) {
+      setToast({ message: 'Please fill in items and amounts', type: 'error' })
       return
     }
     setSaving(true)
+    const filledItems = items
+      .filter((row) => row.name.trim())
+      .map((row) => row.name.trim())
     const combinedItem = filledItems.join(', ')
+
     const { error } = await supabase.from('expenses').insert({
       item: combinedItem,
-      amount: parseFloat(amount),
+      amount: totalAmount,
       category,
       notes: notes.trim() || null,
       date,
@@ -68,16 +80,13 @@ export default function AddExpense() {
     if (error) {
       setToast({ message: 'Could not save. Try again.', type: 'error' })
     } else {
-      setToast({ message: `Saved: ${combinedItem} — Rs ${amount}`, type: 'success' })
-      setItems([''])
-      setAmount('')
+      setToast({ message: `Saved: ${combinedItem} — Rs ${totalAmount}`, type: 'success' })
+      setItems([{ name: '', amount: '' }])
       setNotes('')
       setDate(format(new Date(), 'yyyy-MM-dd'))
       loadTodayTotal()
     }
   }
-
-  const hasValidItem = items.some((it) => it.trim().length > 0)
 
   return (
     <div style={{ minHeight: '100dvh', background: 'var(--bg)' }}>
@@ -87,7 +96,7 @@ export default function AddExpense() {
       <PageHeader title="Book" subtitle="Household expenses" />
 
       <div className="page-content with-nav" style={{ paddingTop: 20 }}>
-        {/* Today's summary strip */}
+        {/* Today strip */}
         <div style={{
           background: 'var(--card)', border: '1px solid var(--border)',
           borderRadius: 14, padding: '14px 18px', marginBottom: 24,
@@ -113,25 +122,46 @@ export default function AddExpense() {
           borderRadius: 16, padding: 20,
           display: 'flex', flexDirection: 'column', gap: 16,
         }}>
-          {/* Item fields */}
+
+          {/* Column headers */}
           <div>
-            <label className="label">Items</label>
+            <div style={{ display: 'flex', gap: 8, marginBottom: 6 }}>
+              <span className="label" style={{ flex: 1, marginBottom: 0 }}>Item</span>
+              <span className="label" style={{ width: 90, marginBottom: 0, textAlign: 'right', flexShrink: 0 }}>Amount (Rs)</span>
+              {/* spacer for remove button column */}
+              {items.length > 1 && <span style={{ width: 36, flexShrink: 0 }} />}
+            </div>
+
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {items.map((item, index) => (
+              {items.map((row, index) => (
                 <div key={index} style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  {/* Item name */}
                   <div style={{ flex: 1 }}>
                     <AutocorrectInput
-                      value={item}
-                      onChange={(val) => updateItem(index, val)}
-                      placeholder={index === 0 ? 'e.g. tomato, aloo...' : 'Another item...'}
+                      value={row.name}
+                      onChange={(val) => updateItem(index, 'name', val)}
+                      placeholder={index === 0 ? 'tomato, aloo...' : 'Item name...'}
                     />
                   </div>
+
+                  {/* Per-item amount */}
+                  <input
+                    type="number"
+                    className="input-field"
+                    value={row.amount}
+                    onChange={(e) => updateItem(index, 'amount', e.target.value)}
+                    placeholder="0"
+                    inputMode="decimal"
+                    style={{ width: 90, flexShrink: 0, fontSize: 16, fontWeight: 600, textAlign: 'right' }}
+                  />
+
+                  {/* Remove row */}
                   {items.length > 1 && (
                     <button
                       type="button"
-                      onClick={() => removeItemField(index)}
+                      onClick={() => removeItemRow(index)}
                       style={{
-                        width: 36, height: 48, borderRadius: 10, flexShrink: 0,
+                        width: 36, height: 48, flexShrink: 0, borderRadius: 10,
                         border: '1px solid var(--border)', background: 'var(--bg-3)',
                         color: 'var(--text-3)', cursor: 'pointer',
                         display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -146,13 +176,12 @@ export default function AddExpense() {
               ))}
             </div>
 
-            {/* Add another item button */}
+            {/* Add row button */}
             <button
               type="button"
-              onClick={addItemField}
+              onClick={addItemRow}
               style={{
-                marginTop: 8,
-                display: 'flex', alignItems: 'center', gap: 6,
+                marginTop: 8, display: 'flex', alignItems: 'center', gap: 6,
                 padding: '8px 12px', borderRadius: 8,
                 border: '1px dashed var(--border)', background: 'transparent',
                 color: 'var(--text-3)', fontSize: 13, cursor: 'pointer',
@@ -166,26 +195,32 @@ export default function AddExpense() {
             </button>
           </div>
 
-          <div style={{ display: 'flex', gap: 12 }}>
-            <div style={{ flex: 1 }}>
-              <label className="label">Amount (Rs)</label>
-              <input
-                type="number" className="input-field" value={amount}
-                onChange={(e) => setAmount(e.target.value)}
-                placeholder="0" inputMode="numeric"
-                style={{ fontSize: 18, fontWeight: 600 }}
-              />
-            </div>
-            <div style={{ flex: 1 }}>
-              <label className="label">Date</label>
-              <input
-                type="date" className="input-field" value={date}
-                onChange={(e) => setDate(e.target.value)}
-                style={{ fontSize: 15 }}
-              />
-            </div>
+          {/* Total — read only */}
+          <div style={{
+            display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+            padding: '12px 16px', borderRadius: 10,
+            background: 'var(--bg-3)', border: '1px solid var(--border)',
+          }}>
+            <span style={{ fontSize: 14, color: 'var(--text-2)', fontWeight: 500 }}>Total</span>
+            <span style={{
+              fontSize: 22, fontWeight: 700, letterSpacing: '-0.03em',
+              color: totalAmount > 0 ? 'var(--accent)' : 'var(--text-3)',
+            }}>
+              Rs {totalAmount > 0 ? totalAmount.toLocaleString('en-IN') : '0'}
+            </span>
           </div>
 
+          {/* Date */}
+          <div>
+            <label className="label">Date</label>
+            <input
+              type="date" className="input-field" value={date}
+              onChange={(e) => setDate(e.target.value)}
+              style={{ fontSize: 15 }}
+            />
+          </div>
+
+          {/* Category */}
           <div>
             <label className="label">Category</label>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -204,6 +239,7 @@ export default function AddExpense() {
             </div>
           </div>
 
+          {/* Notes */}
           <div>
             <label className="label">Notes (optional)</label>
             <input
@@ -216,8 +252,8 @@ export default function AddExpense() {
           <button
             className="btn-primary"
             onClick={handleSubmit}
-            disabled={saving || !hasValidItem || !amount}
-            style={{ opacity: saving || !hasValidItem || !amount ? 0.5 : 1, marginTop: 4 }}
+            disabled={saving || !canSubmit}
+            style={{ opacity: saving || !canSubmit ? 0.5 : 1, marginTop: 4 }}
           >
             {saving ? 'Saving...' : 'Add to Book'}
           </button>
