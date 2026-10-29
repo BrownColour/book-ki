@@ -30,10 +30,17 @@ export default function Ledger() {
   const [saving, setSaving] = useState(false)
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null)
   const [loading, setLoading] = useState(true)
+  const [cycleId, setCycleId] = useState<string | null>(null)
 
   useEffect(() => {
+    loadCycleId()
     loadTransactions()
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const loadCycleId = async () => {
+    const { data } = await supabase.from('cycles').select('id').eq('is_current', true).single()
+    if (data) setCycleId(data.id)
+  }
 
   const loadTransactions = async () => {
     setLoading(true)
@@ -69,6 +76,7 @@ export default function Ledger() {
       note: addNote.trim() || null,
       date: addDate,
       type: addType,
+      cycle_id: cycleId,
     })
     setSaving(false)
     if (error) {
