@@ -34,3 +34,12 @@ export type LedgerTransaction = {
   type: 'given' | 'returned'
   updated_at: string
 }
+
+export type Cycle = {
+  id: string
+  started_at: string
+  ended_at?: string
+  amount_received: number
+  opening_balance: number
+  is_current: boolean
+}
